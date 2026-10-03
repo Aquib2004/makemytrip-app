@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const SANDBOX = {
@@ -7,11 +7,24 @@ const SANDBOX = {
   hotels: "https://hms-external-sandbox.travclan.com",
 };
 
+// TravClan sandbox credentials must be supplied at runtime.
+//
+// These were previously hardcoded here and committed to a public repository.
+// They now come from the environment so that credentials never enter version
+// control again. Copy .env.example to .env and fill in your own sandbox
+// credentials from https://sandbox.travclan.com
+//
+// Create React App only exposes variables prefixed with REACT_APP_.
 const CREDS = {
-  merchant_id: "merqjk7edd5",
-  user_id: "566e18109",
-  api_key: "c8b3d73f-70b4-4032-99a0-f4854bfd8196",
+  merchant_id: process.env.REACT_APP_TRAVCLAN_MERCHANT_ID || "",
+  user_id: process.env.REACT_APP_TRAVCLAN_USER_ID || "",
+  api_key: process.env.REACT_APP_TRAVCLAN_API_KEY || "",
 };
+
+/** True when sandbox credentials have been supplied. */
+const hasCredentials = Boolean(
+  CREDS.merchant_id && CREDS.user_id && CREDS.api_key
+);
 
 // ── HELPERS ────────────────────────────────────────────────────────────────
 const today = () => new Date().toISOString().split("T")[0];
@@ -56,6 +69,17 @@ export default function App() {
 
   // ── AUTH ──
   const authenticate = async () => {
+    // Fail loudly when credentials are absent. Previously this fell through to
+    // a fabricated "DEMO_TOKEN_" value, which made the UI look functional while
+    // every API call was guaranteed to fail.
+    if (!hasCredentials) {
+      setAuthStatus("error");
+      setError(
+        "TravClan sandbox credentials are not configured. Copy .env.example " +
+          "to .env and fill in your sandbox credentials."
+      );
+      return null;
+    }
     setAuthStatus("loading");
     try {
       const res = await fetch(SANDBOX.auth, {
@@ -69,10 +93,8 @@ export default function App() {
       throw new Error("No token in response");
     } catch (e) {
       setAuthStatus("error");
-      // Use demo token for UI showcase
-      const demo = "DEMO_TOKEN_" + Date.now();
-      setToken(demo);
-      return demo;
+      setError("Sandbox authentication failed. Check your credentials.");
+      return null;
     }
   };
 
@@ -81,7 +103,8 @@ export default function App() {
   // ── FLIGHT SEARCH ──
   const searchFlights = async () => {
     setLoading(true); setError(null); setResults(null); setStep("results");
-    const t = token || await authenticate();
+    const t = token || (await authenticate());
+    if (!t) { setLoading(false); return; }
     try {
       const payload = {
         traceId: "TRACE_" + Date.now(),
@@ -102,12 +125,12 @@ export default function App() {
       });
       const data = await res.json();
       if (data?.data?.flights?.length) {
-        setResults({ type: "flights", items: data.data.flights });
+        setResults({ type: "flights", items: data.data.flights, isMock: false });
       } else {
-        setResults({ type: "flights", items: getMockFlights() });
+        setResults({ type: "flights", items: getMockFlights(), isMock: true });
       }
     } catch {
-      setResults({ type: "flights", items: getMockFlights() });
+      setResults({ type: "flights", items: getMockFlights(), isMock: true });
     }
     setLoading(false);
   };
@@ -115,7 +138,8 @@ export default function App() {
   // ── HOTEL SEARCH ──
   const searchHotels = async () => {
     setLoading(true); setError(null); setResults(null); setStep("results");
-    const t = token || await authenticate();
+    const t = token || (await authenticate());
+    if (!t) { setLoading(false); return; }
     try {
       const res = await fetch(`${SANDBOX.hotels}/hms-external/api/v1/hotels/search`, {
         method: "POST",
@@ -130,12 +154,12 @@ export default function App() {
       });
       const data = await res.json();
       if (data?.data?.hotels?.length) {
-        setResults({ type: "hotels", items: data.data.hotels });
+        setResults({ type: "hotels", items: data.data.hotels, isMock: false });
       } else {
-        setResults({ type: "hotels", items: getMockHotels() });
+        setResults({ type: "hotels", items: getMockHotels(), isMock: true });
       }
     } catch {
-      setResults({ type: "hotels", items: getMockHotels() });
+      setResults({ type: "hotels", items: getMockHotels(), isMock: true });
     }
     setLoading(false);
   };
@@ -229,6 +253,24 @@ export default function App() {
             </div>
           ) : results?.items?.length ? (
             <div style={styles.resultsList}>
+              {/* Sample results must never be mistaken for live availability. */}
+              {results.isMock && (
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    margin: "0 0 12px",
+                    borderRadius: "8px",
+                    background: "#fff4e5",
+                    border: "1px solid #ffd8a8",
+                    color: "#7a4b00",
+                    fontSize: "13px",
+                  }}
+                  role="status"
+                >
+                  Showing sample data. The TravClan sandbox API did not return
+                  results, so these fares and rates are not real.
+                </div>
+              )}
               {results.items.map((item, i) =>
                 tab === "flights"
                   ? <FlightCard key={i} flight={item} onSelect={() => { setSelected(item); setStep("detail"); }} />
